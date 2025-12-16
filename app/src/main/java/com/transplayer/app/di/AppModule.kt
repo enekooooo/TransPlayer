@@ -3,6 +3,8 @@ package com.transplayer.app.di
 import android.content.Context
 import androidx.room.Room
 import com.transplayer.app.data.local.TransPlayerDatabase
+import com.transplayer.app.feature.player.data.repository.VideoRepositoryImpl
+import com.transplayer.app.feature.player.domain.repository.VideoRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -35,6 +37,12 @@ object AppModule {
             "transplayer.db"
         ).build()
     }
+    
+    @Provides
+    @Singleton
+    fun provideVideoRepository(
+        videoRepositoryImpl: VideoRepositoryImpl
+    ): VideoRepository = videoRepositoryImpl
 }
 
 
