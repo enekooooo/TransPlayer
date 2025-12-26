@@ -4,8 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,6 +25,10 @@ fun PlayerControls(
     modifier: Modifier = Modifier,
     onPlayPauseClick: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSeekForward: (() -> Unit)? = null,
+    onSeekBackward: (() -> Unit)? = null,
+    onSpeedClick: (() -> Unit)? = null,
+    onAspectRatioClick: (() -> Unit)? = null,
     onFullscreenClick: () -> Unit = {},
     isControlsVisible: Boolean = true
 ) {
@@ -64,17 +67,45 @@ fun PlayerControls(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 播放/暂停按钮
-                IconButton(onClick = onPlayPauseClick) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) {
-                            Icons.Default.Pause
-                        } else {
-                            Icons.Default.PlayArrow
-                        },
-                        contentDescription = if (playbackState.isPlaying) "暂停" else "播放",
-                        tint = Color.White
-                    )
+                // 左侧控制按钮组
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 快退10秒
+                    if (onSeekBackward != null) {
+                        IconButton(onClick = onSeekBackward) {
+                            Icon(
+                                imageVector = Icons.Default.Replay10,
+                                contentDescription = "快退10秒",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    
+                    // 播放/暂停按钮
+                    IconButton(onClick = onPlayPauseClick) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) {
+                                Icons.Default.Pause
+                            } else {
+                                Icons.Default.PlayArrow
+                            },
+                            contentDescription = if (playbackState.isPlaying) "暂停" else "播放",
+                            tint = Color.White
+                        )
+                    }
+                    
+                    // 快进10秒
+                    if (onSeekForward != null) {
+                        IconButton(onClick = onSeekForward) {
+                            Icon(
+                                imageVector = Icons.Default.Forward10,
+                                contentDescription = "快进10秒",
+                                tint = Color.White
+                            )
+                        }
+                    }
                 }
                 
                 // 时间显示
@@ -99,8 +130,46 @@ fun PlayerControls(
                     )
                 }
                 
-                // 占位，用于对齐
-                Spacer(modifier = Modifier.width(48.dp))
+                // 右侧控制按钮组
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 播放速度按钮
+                    if (onSpeedClick != null) {
+                        TextButton(
+                            onClick = onSpeedClick,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(
+                                text = "${playbackState.playbackSpeed}x",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    
+                    // 画面比例按钮
+                    if (onAspectRatioClick != null) {
+                        IconButton(onClick = onAspectRatioClick) {
+                            Icon(
+                                imageVector = Icons.Default.AspectRatio,
+                                contentDescription = "画面比例",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    
+                    // 全屏按钮
+                    IconButton(onClick = onFullscreenClick) {
+                        Icon(
+                            imageVector = Icons.Default.Fullscreen,
+                            contentDescription = "全屏",
+                            tint = Color.White
+                        )
+                    }
+                }
             }
         }
     }

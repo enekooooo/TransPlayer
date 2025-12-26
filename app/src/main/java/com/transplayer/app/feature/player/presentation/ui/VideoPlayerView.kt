@@ -21,6 +21,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.transplayer.app.feature.player.presentation.viewmodel.VideoAspectRatio
 
 @UnstableApi
 @Composable
@@ -28,9 +29,18 @@ fun VideoPlayerView(
     player: Player?,
     modifier: Modifier = Modifier,
     isLoading: Boolean = false,
+    aspectRatio: VideoAspectRatio = VideoAspectRatio.FIT,
     onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    
+    val resizeMode = when (aspectRatio) {
+        VideoAspectRatio.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        VideoAspectRatio.ORIGINAL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        VideoAspectRatio.SIXTEEN_NINE -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        VideoAspectRatio.FOUR_THREE -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        VideoAspectRatio.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+    }
     
     Box(
         modifier = modifier
@@ -45,12 +55,12 @@ fun VideoPlayerView(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     useController = false // 使用自定义控制器
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
             },
             modifier = Modifier.fillMaxSize(),
             update = { playerView ->
                 playerView.player = player
+                playerView.resizeMode = resizeMode
             }
         )
         

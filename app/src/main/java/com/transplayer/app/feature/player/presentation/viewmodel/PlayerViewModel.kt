@@ -5,15 +5,21 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import android.app.Activity
+import com.transplayer.app.data.local.UserPreferences
+import com.transplayer.app.feature.player.data.BrightnessManager
 import com.transplayer.app.feature.player.data.ExoPlayerManager
 import com.transplayer.app.feature.player.domain.model.PlaybackState
 import com.transplayer.app.feature.player.domain.model.VideoSource
+import com.transplayer.app.feature.player.domain.repository.PlaybackHistoryRepository
 import com.transplayer.app.feature.player.domain.usecase.PlayVideoUseCase
+import com.transplayer.app.feature.player.presentation.viewmodel.VideoAspectRatio
 import com.transplayer.app.util.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,8 +28,20 @@ import javax.inject.Inject
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     private val exoPlayerManager: ExoPlayerManager,
-    private val playVideoUseCase: PlayVideoUseCase
+    private val playVideoUseCase: PlayVideoUseCase,
+    private val userPreferences: UserPreferences,
+    private val brightnessManager: BrightnessManager,
+    private val playbackHistoryRepository: PlaybackHistoryRepository
 ) : ViewModel() {
+    
+    private var currentActivity: Activity? = null
+    
+    fun setActivity(activity: Activity) {
+        currentActivity = activity
+        // 初始化亮度为系统亮度
+        val systemBrightness = brightnessManager.getSystemBrightness(activity)
+        _uiState.update { it.copy(currentBrightness = systemBrightness) }
+    }
     
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -88,9 +106,19 @@ class PlayerViewModel @Inject constructor(
         val player = exoPlayerManager.initializePlayer()
         exoPlayerManager.addPlayerListener(playerListener)
         startPositionUpdates()
+        loadSavedPlaybackSpeed()
     }
     
-    fun playVideo(source: VideoSource) {
+    private fun loadSavedPlaybackSpeed() {
+        viewModelScope.launch {
+            val savedSpeed = userPreferences.playbackSpeed.first()
+            if (savedSpeed != 1.0f) {
+                setPlaybackSpeed(savedSpeed)
+            }
+        }
+    }
+    
+    fun playVideo(source: VideoSource, resumeFromHistory: Boolean = true) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             
@@ -101,11 +129,29 @@ class PlayerViewModel @Inject constructor(
                         val isHls = validatedSource.isHls()
                         exoPlayerManager.loadMedia(uri, isHls)
                         
+                        // 尝试从历史记录恢复播放位置
+                        var resumePosition: Long? = null
+                        if (resumeFromHistory) {
+                            val history = playbackHistoryRepository.getHistoryByVideoSource(validatedSource)
+                            if (history != null && history.lastPosition > 0 && history.duration > 0) {
+                                // 如果历史位置超过视频总长度的90%，不恢复
+                                val resumeThreshold = history.duration * 0.9
+                                if (history.lastPosition < resumeThreshold) {
+                                    resumePosition = history.lastPosition
+                                }
+                            }
+                        }
+                        
                         _uiState.update {
                             it.copy(
                                 videoSource = validatedSource,
                                 isLoading = false
                             )
+                        }
+                        
+                        // 如果有恢复位置，先跳转到该位置
+                        resumePosition?.let { position ->
+                            seekTo(position)
                         }
                         
                         play()
@@ -129,6 +175,29 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
             )
+        }
+    }
+    
+    fun savePlaybackProgress() {
+        viewModelScope.launch {
+            val videoSource = _uiState.value.videoSource ?: return@launch
+            val player = exoPlayerManager.getPlayer() ?: return@launch
+            val currentPosition = player.currentPosition
+            val duration = player.duration
+            
+            if (currentPosition > 0 && duration > 0) {
+                val videoTitle = when (videoSource) {
+                    is VideoSource.Local -> videoSource.path.substringAfterLast("/")
+                    is VideoSource.Remote -> videoSource.url.substringAfterLast("/")
+                }
+                
+                playbackHistoryRepository.savePlaybackHistory(
+                    videoSource = videoSource,
+                    videoTitle = videoTitle,
+                    position = currentPosition,
+                    duration = duration
+                )
+            }
         }
     }
     
@@ -156,6 +225,85 @@ class PlayerViewModel @Inject constructor(
     fun setPlaybackSpeed(speed: Float) {
         exoPlayerManager.getPlayer()?.setPlaybackSpeed(speed)
         updatePlaybackState { it.copy(playbackSpeed = speed) }
+        viewModelScope.launch {
+            userPreferences.setPlaybackSpeed(speed)
+        }
+    }
+    
+    fun toggleSpeedMenu() {
+        _uiState.update { it.copy(isSpeedMenuVisible = !it.isSpeedMenuVisible) }
+    }
+    
+    fun setSpeedMenuVisible(visible: Boolean) {
+        _uiState.update { it.copy(isSpeedMenuVisible = visible) }
+    }
+    
+    // 快进快退功能
+    fun seekForward(seconds: Int = 10) {
+        val player = exoPlayerManager.getPlayer() ?: return
+        val currentPosition = player.currentPosition
+        val duration = player.duration
+        val newPosition = (currentPosition + seconds * 1000L).coerceAtMost(duration)
+        seekTo(newPosition)
+    }
+    
+    fun seekBackward(seconds: Int = 10) {
+        val player = exoPlayerManager.getPlayer() ?: return
+        val currentPosition = player.currentPosition
+        val newPosition = (currentPosition - seconds * 1000L).coerceAtLeast(0L)
+        seekTo(newPosition)
+    }
+    
+    // 音量控制
+    fun setVolume(volume: Float) {
+        val player = exoPlayerManager.getPlayer() ?: return
+        val volumeLevel = volume.coerceIn(0f, 1f)
+        player.volume = volumeLevel
+        _uiState.update { it.copy(currentVolume = volumeLevel) }
+    }
+    
+    fun toggleVolumeControl() {
+        _uiState.update { it.copy(isVolumeControlVisible = !it.isVolumeControlVisible) }
+    }
+    
+    fun setVolumeControlVisible(visible: Boolean) {
+        _uiState.update { it.copy(isVolumeControlVisible = visible) }
+    }
+    
+    // 亮度控制
+    fun setBrightness(brightness: Float) {
+        val brightnessLevel = brightness.coerceIn(0f, 1f)
+        _uiState.update { it.copy(currentBrightness = brightnessLevel) }
+        currentActivity?.let { activity ->
+            brightnessManager.setBrightness(activity, brightnessLevel)
+        }
+    }
+    
+    fun restoreBrightness() {
+        currentActivity?.let { activity ->
+            brightnessManager.restoreBrightness(activity)
+        }
+    }
+    
+    fun toggleBrightnessControl() {
+        _uiState.update { it.copy(isBrightnessControlVisible = !it.isBrightnessControlVisible) }
+    }
+    
+    fun setBrightnessControlVisible(visible: Boolean) {
+        _uiState.update { it.copy(isBrightnessControlVisible = visible) }
+    }
+    
+    // 画面比例
+    fun setVideoAspectRatio(aspectRatio: VideoAspectRatio) {
+        _uiState.update { it.copy(videoAspectRatio = aspectRatio) }
+    }
+    
+    fun toggleAspectRatioMenu() {
+        _uiState.update { it.copy(isAspectRatioMenuVisible = !it.isAspectRatioMenuVisible) }
+    }
+    
+    fun setAspectRatioMenuVisible(visible: Boolean) {
+        _uiState.update { it.copy(isAspectRatioMenuVisible = visible) }
     }
     
     fun toggleControls() {
@@ -191,6 +339,12 @@ class PlayerViewModel @Inject constructor(
             while (true) {
                 kotlinx.coroutines.delay(500) // 每500ms更新一次
                 updatePlayerPosition()
+                
+                // 每5秒保存一次播放进度
+                val currentTime = System.currentTimeMillis()
+                if (currentTime % 5000 < 500) {
+                    savePlaybackProgress()
+                }
             }
         }
     }
@@ -215,6 +369,8 @@ class PlayerViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         exoPlayerManager.removePlayerListener(playerListener)
+        // 恢复亮度
+        restoreBrightness()
         // 注意：不在这里释放player，因为可能需要在Activity/Fragment中管理生命周期
     }
     
